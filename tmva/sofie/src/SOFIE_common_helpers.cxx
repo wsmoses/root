@@ -554,7 +554,9 @@ inline void Relu(float *output, float const *input, int size)
 constexpr const char *kFill = R"SOFIE(
 inline void Fill(float *output, float value, int size)
 {
-   std::fill(output, output + size, value);
+   for (int i = 0; i < size; ++i) {
+      output[i] = value;
+   }
 }
 )SOFIE";
 
@@ -562,7 +564,9 @@ constexpr const char *kCopy = R"SOFIE(
 template <class T>
 inline void Copy(T *output, T const *input, int size)
 {
-   std::copy(input, input + size, output);
+   for (int i = 0; i < size; ++i) {
+      output[i] = input[i];
+   }
 }
 )SOFIE";
 

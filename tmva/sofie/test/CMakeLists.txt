@@ -121,7 +121,7 @@ if (ONNX_MODELS_DIR)
                       EXEC ./TestCustomModelsFromONNX
                       FIXTURES_REQUIRED sofie-compile-models-onnx)
 
-    if (clad)
+    if (clad OR enzyme)
       ROOT_EXECUTABLE(TestCladAutodiff TestCladAutodiff.cxx
         LIBRARIES Core GTest::gtest GTest::gtest_main
       )
@@ -129,11 +129,19 @@ if (ONNX_MODELS_DIR)
                         EXEC ./TestCladAutodiff
                         FIXTURES_REQUIRED sofie-compile-models-onnx)
     endif()
+    if (enzyme)
+      ROOT_EXECUTABLE(TestEnzymeAutodiff TestEnzymeAutodiff.cxx
+        LIBRARIES Core GTest::gtest GTest::gtest_main
+      )
+      ROOTTEST_ADD_TEST(TestEnzymeAutodiff
+                        EXEC ./TestEnzymeAutodiff
+                        FIXTURES_REQUIRED sofie-compile-models-onnx)
+    endif()
   endif()
 endif()
 
 if (BLAS_FOUND)
-  if (clad)
+  if (clad OR enzyme)
     # Creating a Google Test for the automatic differentiation of Gemm_Call
     ROOT_ADD_GTEST(TestGemmDerivative TestGemmDerivative.cxx LIBRARIES Core BLAS::BLAS ROOTTMVASofie)
   endif()

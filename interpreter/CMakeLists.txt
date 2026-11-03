@@ -79,7 +79,7 @@ if(NOT experimental_adaptivecpp)
   set(CMAKE_DISABLE_FIND_PACKAGE_CUDA ON)
 endif()
 
-if (clad)
+if (clad OR enzyme)
   set(CLING_BUILD_PLUGINS ON)
 endif()
 

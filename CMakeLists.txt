@@ -696,8 +696,8 @@ set(root_kernel_file kernel.json)
 configure_file(etc/${root_kernel_dir}/${root_kernel_file}.in etc/${root_kernel_dir}/${root_kernel_file})
 install(FILES ${CMAKE_BINARY_DIR}/etc/${root_kernel_dir}/${root_kernel_file} DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/${root_kernel_dir})
 
-#---install clad header files-------------------------------------------------------------------
-if(clad)
+#---install clad / enzyme header files----------------------------------------------------------
+if(clad OR enzyme)
    install(DIRECTORY ${CMAKE_BINARY_DIR}/etc/cling/plugins/
       DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/cling/plugins)
 endif()

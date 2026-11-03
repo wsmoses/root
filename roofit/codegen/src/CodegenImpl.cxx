@@ -466,6 +466,74 @@ void functorCodegenImpl(RooArg_t &arg, RooArgList const &variables, CodegenConte
 
       std::string code;
 
+#if defined(R__HAS_ENZYME) && !defined(R__HAS_CLAD)
+      code += "#include <enzyme/enzyme>\n"
+              "double " +
+              wrapperName +
+              "(double const *x) {\n"
+              "   return " +
+              funcAddrCasted +
+              "->operator()(x);\n"
+              "}\n\n"
+              "struct " +
+              wrapperName +
+              "_fwd_ret { double val; double dval; };\n"
+              "inline " +
+              wrapperName + "_fwd_ret " + wrapperName +
+              "_fwddiff(double const *x, double const *dx) {\n"
+              "   double d = 0.0;\n"
+              "   if (dx) {\n"
+              "      double output[" +
+              nStr +
+              "]{};\n"
+              "      " +
+              funcAddrCasted +
+              "->Gradient(x, output);\n"
+              "      for (int i = 0; i < " +
+              nStr +
+              "; ++i) {\n"
+              "         d += output[i] * dx[i];\n"
+              "      }\n"
+              "   }\n"
+              "   return {" +
+              funcAddrCasted +
+              "->operator()(x), d};\n"
+              "}\n"
+              "struct " +
+              wrapperName +
+              "_aug_ret { double *tape; double val; };\n"
+              "inline " +
+              wrapperName + "_aug_ret " + wrapperName +
+              "_augfwd(double const *x, double * /*d_x*/) {\n"
+              "   double *tape = new double[" +
+              nStr +
+              "]{};\n"
+              "   " +
+              funcAddrCasted +
+              "->Gradient(x, tape);\n"
+              "   return {tape, " +
+              funcAddrCasted +
+              "->operator()(x)};\n"
+              "}\n"
+              "inline void " +
+              wrapperName +
+              "_rev(double const *x, double *d_x, double d_y, double *tape) {\n"
+              "   if (d_x && d_x != x) {\n"
+              "      for (int i = 0; i < " +
+              nStr +
+              "; ++i) {\n"
+              "         d_x[i] += tape[i] * d_y;\n"
+              "      }\n"
+              "   }\n"
+              "   delete[] tape;\n"
+              "}\n"
+              "__attribute__((used)) inline void *__enzyme_register_gradient_" +
+              wrapperName + "[3] = {(void *)&" + wrapperName + ", (void *)&" + wrapperName + "_augfwd, (void *)&" +
+              wrapperName +
+              "_rev};\n"
+              "__attribute__((used)) inline void *__enzyme_register_derivative_" +
+              wrapperName + "[2] = {(void *)&" + wrapperName + ", (void *)&" + wrapperName + "_fwddiff};\n";
+#else
       code += "double " + wrapperName +
               "(double const *x) {\n"
               "   return " +
@@ -489,6 +557,7 @@ void functorCodegenImpl(RooArg_t &arg, RooArgList const &variables, CodegenConte
               "   }\n"
               "}\n"
               "} // namespace clad::custom_derivatives\n";
+#endif
 
       gInterpreter->Declare(code.c_str());
    }

@@ -50,6 +50,7 @@ target_include_directories(MetaCling SYSTEM PRIVATE
   ${CLANG_INCLUDE_DIRS}
   ${LLVM_INCLUDE_DIRS}
   ${CLAD_INCLUDE_DIRS}
+  ${ENZYME_INCLUDE_DIRS}
   ${CMAKE_BINARY_DIR}/etc/cppinterop
 )
 
@@ -119,6 +120,19 @@ if (clad)
     # Link our clad libraries to clang. If users use the clang from ROOT they will
     # also be able to use clad out of the box.
     add_dependencies(clang clad)
+    target_link_libraries(clang PUBLIC ${CLING_PLUGIN_LINK_LIBS})
+  endif()
+elseif (enzyme)
+  if (APPLE)
+    set(CLING_PLUGIN_LINK_LIBS -Wl,-force_load ClangEnzymeStatic)
+  elseif(MSVC)
+    set(CLING_PLUGIN_LINK_LIBS ClangEnzymeStatic)
+    set(CLAD_LIBS "-WHOLEARCHIVE:ClangEnzymeStatic.lib")
+  else()
+    set(CLING_PLUGIN_LINK_LIBS -Wl,--whole-archive ClangEnzymeStatic -Wl,--no-whole-archive)
+  endif()
+  if(TARGET clang AND NOT experimental_adaptivecpp)
+    add_dependencies(clang enzyme)
     target_link_libraries(clang PUBLIC ${CLING_PLUGIN_LINK_LIBS})
   endif()
 endif()

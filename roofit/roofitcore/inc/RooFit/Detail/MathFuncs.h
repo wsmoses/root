@@ -189,6 +189,9 @@ double constraintSum(DoubleArray comp, unsigned int compSize)
    return sum;
 }
 
+#if defined(__CLING__) && defined(R__HAS_ENZYME)
+__attribute__((enzyme_inactive))
+#endif
 inline unsigned int uniformBinNumber(double low, double high, double val, unsigned int numBins, double coef)
 {
    double binWidth = (high - low) / numBins;
@@ -196,6 +199,9 @@ inline unsigned int uniformBinNumber(double low, double high, double val, unsign
 }
 
 template <typename DoubleArray>
+#if defined(__CLING__) && defined(R__HAS_ENZYME)
+__attribute__((enzyme_inactive))
+#endif
 unsigned int rawBinNumber(double x, DoubleArray boundaries, std::size_t nBoundaries)
 {
    DoubleArray end = boundaries + nBoundaries;
@@ -208,6 +214,9 @@ unsigned int rawBinNumber(double x, DoubleArray boundaries, std::size_t nBoundar
 }
 
 template <typename DoubleArray>
+#if defined(__CLING__) && defined(R__HAS_ENZYME)
+__attribute__((enzyme_inactive))
+#endif
 unsigned int binNumber(double x, double coef, DoubleArray boundaries, unsigned int nBoundaries, int nbins, int blo)
 {
    const int rawBin = rawBinNumber(x, boundaries, nBoundaries);
@@ -569,7 +578,14 @@ inline double bifurGaussIntegral(double xMin, double xMax, double mean, double s
 /// of this header: differentiating the branches would give zero at x = 0.
 inline double expm1OverX(double x)
 {
-   return x == 0.0 ? 1.0 : std::expm1(x) / x;
+   if (std::abs(x) < 0.25) {
+      // clang-format off
+      return 1.0 + x * (1.0 / 2.0 + x * (1.0 / 6.0 + x * (1.0 / 24.0 + x * (1.0 / 120.0 + x * (1.0 / 720.0 +
+             x * (1.0 / 5040.0 + x * (1.0 / 40320.0 + x * (1.0 / 362880.0 + x * (1.0 / 3628800.0 +
+             x * (1.0 / 39916800.0 + x * (1.0 / 479001600.0 + x * (1.0 / 6227020800.0))))))))))));
+      // clang-format on
+   }
+   return std::expm1(x) / x;
 }
 
 /// Derivative of expm1OverX(). The closed form (x * exp(x) - expm1(x)) / x^2
@@ -596,15 +612,12 @@ inline double expm1OverXDerivative(double x)
 /// the end of this header (https://github.com/root-project/root/issues/23724).
 inline double exponentialIntegral(double xMin, double xMax, double constant)
 {
-   if (constant == 0.0) {
-      return xMax - xMin;
+   const double dx = xMax - xMin;
+   const double z = constant * dx;
+   if (z > 0.25) {
+      return std::exp(constant * xMax) * dx * expm1OverX(-z);
    }
-
-   const double z = constant * (xMax - xMin);
-   if (z > 0.0) {
-      return -std::exp(constant * xMax) * std::expm1(-z) / constant;
-   }
-   return std::exp(constant * xMin) * std::expm1(z) / constant;
+   return std::exp(constant * xMin) * dx * expm1OverX(z);
 }
 
 /// Derivative of exponentialIntegral() with respect to the constant, i.e. the

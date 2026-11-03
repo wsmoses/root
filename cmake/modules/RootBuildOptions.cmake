@@ -120,7 +120,7 @@ ROOT_BUILD_OPTION(builtin_zstd OFF "Build zstd from an automatically downloaded 
 ROOT_BUILD_OPTION(ccache OFF "Enable ccache usage for speeding up builds")
 ROOT_BUILD_OPTION(cefweb OFF "Enable support for CEF (Chromium Embedded Framework) web-based display")
 ROOT_BUILD_OPTION(check_connection ON "Fail the configuration step if there is no internet connection, but it's required for the build")
-ROOT_BUILD_OPTION(clad ON "Build clad, the cling automatic differentiation plugin (requires network, or existing source directory indicated with -DCLAD_SOURCE_DIR=<clad_src_path>)")
+ROOT_BUILD_OPTION(clad OFF "Build clad, the legacy cling automatic differentiation plugin (requires network, or existing source directory indicated with -DCLAD_SOURCE_DIR=<clad_src_path>)")
 ROOT_BUILD_OPTION(cocoa OFF "Use native Cocoa/Quartz graphics backend (MacOS X only)")
 ROOT_BUILD_OPTION(coverage OFF "Enable compile flags for coverage testing")
 ROOT_BUILD_OPTION(cuda OFF "Enable support for CUDA (requires CUDA toolkit >= 7.5)")
@@ -131,6 +131,7 @@ ROOT_BUILD_OPTION(davix ON "Enable support for Davix (HTTP/WebDAV access)")
 ROOT_BUILD_OPTION(dcache OFF "Enable support for dCache (requires libdcap from DESY)")
 ROOT_BUILD_OPTION(dev OFF "Enable recommended developer compilation flags, reduce exposed includes")
 ROOT_BUILD_OPTION(distcc OFF "Enable distcc usage for speeding up builds (ccache is called first if enabled)")
+ROOT_BUILD_OPTION(enzyme ON "Build Enzyme, the cling/LLVM automatic differentiation plugin (requires network, or existing source directory indicated with -DENZYME_SOURCE_DIR=<enzyme_src_path>)")
 ROOT_BUILD_OPTION(experimental_adaptivecpp OFF "Build AdaptiveCPP for SYCL support")
 ROOT_BUILD_OPTION(experimental_genvectorx OFF "Build GenvectorX (requires SYCL support)")
 ROOT_BUILD_OPTION(fcgi OFF "Enable FastCGI support in HTTP server")
@@ -211,7 +212,7 @@ if(all)
  set(arrow_defvalue ON)
  set(asimage_defvalue ON)
  set(cefweb_defvalue ON)
- set(clad_defvalue ON)
+ set(enzyme_defvalue ON)
  set(curl_defvalue ON)
  set(dataframe_defvalue ON)
  set(davix_defvalue ON)
@@ -329,8 +330,17 @@ if(_BUILD_TYPE_UPPER STREQUAL DEBUG OR dev)
   set(asserts_defvalue ON)
 endif()
 
+#---If clad was explicitly enabled, disable default enzyme unless explicitly requested
+if(clad)
+  set(enzyme_defvalue OFF)
+endif()
+
 #---Define at moment the options with the selected default values------------------------------
 ROOT_APPLY_OPTIONS()
+
+if(clad AND enzyme)
+  message(FATAL_ERROR "The 'enzyme' and 'clad' automatic differentiation options are mutually exclusive. Configure with either -Denzyme=ON -Dclad=OFF (default) or -Dclad=ON -Denzyme=OFF.")
+endif()
 
 #---roottest option implies testing
 if(roottest OR rootbench)

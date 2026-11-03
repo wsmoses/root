@@ -35,6 +35,7 @@
 #@haspthread@ R__HAS_PTHREAD    /**/
 #@hasxft@ R__HAS_XFT    /**/
 #@hasclad@ R__HAS_CLAD    /**/
+#@hasenzyme@ R__HAS_ENZYME  /**/
 #@hascocoa@ R__HAS_COCOA    /**/
 #@hasvdt@ R__HAS_VDT    /**/
 #@hasstdexperimentalsimd@ R__HAS_STD_EXPERIMENTAL_SIMD    /**/

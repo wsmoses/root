@@ -13,7 +13,7 @@ endif()
 
 set(TestSource testMinimizer.cxx)
 list(APPEND TestSource testCovariance.cxx)
-if (clad)
+if (clad OR enzyme)
   list(APPEND TestSource testADMinim.cxx)
 endif()
 

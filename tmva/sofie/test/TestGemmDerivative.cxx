@@ -89,6 +89,40 @@ TEST_P(GemmTest, GemmTestDerivative)
          throw std::runtime_error("TestGemmDerivative: failed to declare emitted SOFIE helper code");
       }
 
+#if defined(R__HAS_ENZYME) && !defined(R__HAS_CLAD)
+      gInterpreter->Declare(R"cpp(
+            #include <enzyme/enzyme>
+
+            float gemm_function(float *variables, int m, int n, int k) {
+                float alpha = variables[0];
+                float beta  = variables[1];
+                float *matA = variables + 2;
+                float *matB = variables + m*k + 2;
+                float *matC = variables + m*k + k*n + 2;
+
+                constexpr int n_out = 24;
+                assert (m*n+1 <= n_out);
+
+                float output[n_out];
+
+                TMVA_SOFIE_GemmTest::Gemm_Call(output, false, false, m, n, k, alpha, matA, matB, beta, matC);
+
+                float ret = 0;
+                for (int i = 0; i < m*n; ++i) {
+                    ret += output[i];
+                }
+                return ret;
+            }
+
+            void gemm_function_grad_0(float *variables, int m, int n, int k, float *_d_variables) {
+                __enzyme_autodiff<void>((void *)gemm_function,
+                                        enzyme_dup, variables, _d_variables,
+                                        enzyme_const, m,
+                                        enzyme_const, n,
+                                        enzyme_const, k);
+            }
+        )cpp");
+#else
       gInterpreter->Declare(R"cpp(
             // Clad differentiation machinery only (no SOFIE custom derivatives):
             // the pullback used below comes from the emitted code declared above.
@@ -124,6 +158,7 @@ TEST_P(GemmTest, GemmTestDerivative)
             }
             #pragma clad OFF
         )cpp");
+#endif
 
       declared = true;
    }

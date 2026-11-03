@@ -10,6 +10,7 @@ include_directories(SYSTEM
   ${CLANG_INCLUDE_DIRS}
   ${LLVM_INCLUDE_DIRS}
   ${CLAD_INCLUDE_DIRS}
+  ${ENZYME_INCLUDE_DIRS}
 )
 
 include_directories(

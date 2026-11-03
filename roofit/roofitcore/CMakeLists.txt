@@ -498,7 +498,7 @@ if(NOT WIN32)
   target_compile_definitions(RooFitCore PUBLIC ROOFIT_MULTIPROCESS)
 endif()
 
-if(clad)
+if(clad OR enzyme)
   target_compile_definitions(RooFitCore PUBLIC ROOFIT_CLAD)
 endif()
 

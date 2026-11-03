@@ -67,9 +67,12 @@ macro(ROOT_CHECK_CONNECTION_AND_DISABLE_OPTION option_name)
   endif()
 endmacro()
 
-# Building Clad requires an internet connection, if we're not side-loading the source directory
+# Building Clad or Enzyme requires an internet connection, if we're not side-loading the source directory
 if(clad AND NOT DEFINED CLAD_SOURCE_DIR)
   ROOT_CHECK_CONNECTION_AND_DISABLE_OPTION("clad")
+endif()
+if(enzyme AND NOT DEFINED ENZYME_SOURCE_DIR)
+  ROOT_CHECK_CONNECTION_AND_DISABLE_OPTION("enzyme")
 endif()
 
 #---Check for installed packages depending on the build options/components enabled --

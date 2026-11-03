@@ -42,7 +42,7 @@ ROOT_ADD_GTEST(testTH1sa test_TH1_SaveAs.cxx LIBRARIES Hist)
 
 ROOT_ADD_GTEST(testTGraphsa test_TGraph_SaveAs.cxx LIBRARIES Hist)
 
-if(clad)
+if(clad OR enzyme)
   ROOT_ADD_GTEST(TFormulaGradientTests TFormulaGradientTests.cxx LIBRARIES Core MathCore Hist)
   ROOT_ADD_GTEST(TFormulaHessianTests TFormulaHessianTests.cxx LIBRARIES Core MathCore Hist)
 endif()

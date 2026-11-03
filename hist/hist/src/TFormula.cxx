@@ -3237,16 +3237,22 @@ static bool functionExists(const string &Name) {
 }
 
 static void IncludeCladRuntime(Bool_t &IsCladRuntimeIncluded) {
-#ifdef ROOT_SUPPORT_CLAD
+#ifdef R__HAS_CLAD
    if (!IsCladRuntimeIncluded) {
       IsCladRuntimeIncluded = true;
       gInterpreter->Declare("#include <Math/CladDerivator.h>\n#pragma clad OFF");
+   }
+#elif defined(R__HAS_ENZYME)
+   if (!IsCladRuntimeIncluded) {
+      IsCladRuntimeIncluded = true;
+      gInterpreter->Declare("#include <Math/EnzymeDerivator.h>");
    }
 #else
    IsCladRuntimeIncluded = false;
 #endif
 }
 
+#ifdef R__HAS_CLAD
 static bool
 DeclareGenerationInput(std::string FuncName, std::string CladStatement,
                        std::string &GenerationInput) {
@@ -3261,6 +3267,7 @@ DeclareGenerationInput(std::string FuncName, std::string CladStatement,
 
    return gInterpreter->Declare(GenerationInput.c_str());
 }
+#endif
 
 static TInterpreter::CallFuncIFacePtr_t::Generic_t
 GetFuncPtr(std::string FuncName, Int_t Npar, Int_t Ndim, Bool_t Vectorized) {
@@ -3322,12 +3329,28 @@ bool TFormula::GenerateGradientPar() {
    // formula. In that case, the hasher will give identical id and we can
    // reuse the already generated gradient function.
    if (!functionExists(GetGradientFuncName())) {
+#if defined(R__HAS_ENZYME) && !defined(R__HAS_CLAD)
+      if (fNpar <= 0 || fVectorized) {
+         fGradGenerationInput = "// unsupported";
+         return false;
+      }
+      const std::string funcName(fClingName.Data());
+      const std::string gradName = GetGradientFuncName();
+      fGradGenerationInput =
+         "#pragma cling optimize(2)\n"
+         "void " + gradName + "(Double_t const *x, Double_t *p, Double_t *_result) {\n"
+         "   __enzyme_autodiff<void>((void *)" + funcName + ", enzyme_const, x, enzyme_dup, p, _result);\n"
+         "}\n";
+      if (!gInterpreter->Declare(fGradGenerationInput.c_str()))
+         return false;
+#else
       std::string GradientCall
           ("clad::gradient(" + std::string(fClingName.Data()) + ", \"p\");");
       if (!DeclareGenerationInput(GetGradientFuncName(),
                                   GradientCall,
                                   fGradGenerationInput))
          return false;
+#endif
    }
 
    fGradFuncPtr = GetFuncPtr(GetGradientFuncName(), fNpar, fNdim, fVectorized);
@@ -3389,6 +3412,45 @@ bool TFormula::GenerateHessianPar()
    // formula. In that case, the hasher will give identical id and we can
    // reuse the already generated hessian function.
    if (!functionExists(GetHessianFuncName())) {
+#if defined(R__HAS_ENZYME) && !defined(R__HAS_CLAD)
+      if (fNpar <= 0 || fVectorized) {
+         fHessGenerationInput = "// unsupported";
+         return false;
+      }
+      const std::string funcName(fClingName.Data());
+      const std::string gradName = GetGradientFuncName();
+      const std::string hessName = GetHessianFuncName();
+      const std::string nStr = std::to_string(fNpar);
+      std::ostringstream ss;
+      ss << "#pragma cling optimize(2)\n";
+      if (!functionExists(gradName)) {
+         ss << "void " << gradName << "(Double_t const *x, Double_t *p, Double_t *_result) {\n"
+            << "   __enzyme_autodiff<void>((void *)" << funcName << ", enzyme_const, x, enzyme_dup, p, _result);\n"
+            << "}\n";
+      }
+      ss << "void " << hessName << "(Double_t const *x, Double_t *p, Double_t *_result) {\n";
+      if (fNpar == 1) {
+         ss << "   Double_t seed = 1.0;\n"
+            << "   Double_t g_dummy = 0.0;\n"
+            << "   __enzyme_fwddiff<void>((void *)" << gradName
+            << ", enzyme_const, x, enzyme_dup, p, &seed, enzyme_dupnoneed, &g_dummy, _result);\n";
+      } else if (fNpar <= 32) {
+         ss << "   Double_t seed[" << (fNpar * fNpar) << "]{};\n"
+            << "   Double_t g_dummy[" << nStr << "]{};\n"
+            << "   for (int i = 0; i < " << nStr << "; ++i) seed[i * " << nStr << " + i] = 1.0;\n"
+            << "   const std::size_t stride = " << nStr << " * sizeof(Double_t);\n"
+            << "   __enzyme_fwddiff<void>((void *)" << gradName << ", enzyme_width, " << nStr
+            << ", enzyme_const, x, enzyme_dupv, stride, p, seed, enzyme_dupnoneedv, stride, g_dummy, _result);\n";
+      } else {
+         ss << "   ROOT::Math::Enzyme::HessianEvaluator<Double_t (*)(Double_t const *, Double_t *)>("
+            << funcName << ", " << nStr << ").execute(x, p, ROOT::Math::Enzyme::array_ref<Double_t>(_result, "
+            << (fNpar * fNpar) << "));\n";
+      }
+      ss << "}\n";
+      fHessGenerationInput = ss.str();
+      if (!gInterpreter->Declare(fHessGenerationInput.c_str()))
+         return false;
+#else
       std::string indexes = (fNpar - 1 == 0) ? "0" : std::string("0:")
           + std::to_string(fNpar - 1);
       std::string HessianCall
@@ -3397,6 +3459,7 @@ bool TFormula::GenerateHessianPar()
       if (!DeclareGenerationInput(GetHessianFuncName(), HessianCall,
                                   fHessGenerationInput))
          return false;
+#endif
    }
 
    fHessFuncPtr = GetFuncPtr(GetHessianFuncName(), fNpar, fNdim, fVectorized);

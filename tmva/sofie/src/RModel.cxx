@@ -1462,11 +1462,13 @@ void RModel::GenerateSessionCode()
    // forwarding for delegating constructors
    std::string dynParamDecls;
    std::string dynParamArgs;
+   std::string dynMemberArgs;
    if (!fDimShapeNames.empty()) {
       // need to use same order as in infer function not alphabetical one
       for (auto &p : fDimShapeNames) {
          dynParamDecls += ",\n        size_t " + p + " = " + fShapeParams[p];
          dynParamArgs += ", " + p;
+         dynMemberArgs += ", " + memberNameForDimShape(p);
       }
    }
    // here add initialization and reading of weight tensors
@@ -1553,6 +1555,26 @@ void RModel::GenerateSessionCode()
    for (auto &graph : fSubGraphs) {
       fGC += "   fSession_" + graph->fName + ".SetWeightsToZero();\n";
    }
+   fGC += "}\n\n";
+
+   // Construct a zero-weight shadow Session directly in memory without reading
+   // any weight file from disk (used by Enzyme automatic differentiation).
+   fGC += "struct ZeroShadowTag {};\n";
+   fGC += sessionName + "(ZeroShadowTag /*tag*/" + dynParamDecls + ") {\n";
+   if (!fDimShapeNames.empty()) {
+      for (const auto &p : fDimShapeNames) {
+         fGC += "   " + memberNameForDimShape(p) + " = " + p + ";\n";
+      }
+   }
+   fGC += fExtraCodeForDimShapes;
+   GenerateDynamicTensorInfo();
+   for (size_t id = 0; id < fOperators.size(); id++) {
+      fGC += fOperators[id]->GenerateInitCode();
+   }
+   fGC += "   SetWeightsToZero();\n";
+   fGC += "}\n\n";
+   fGC += sessionName + " CreateZeroShadow() const {\n";
+   fGC += "   return " + sessionName + "(ZeroShadowTag{}" + dynMemberArgs + ");\n";
    fGC += "}\n\n";
 
    // generate the inference overload that returns an output struct

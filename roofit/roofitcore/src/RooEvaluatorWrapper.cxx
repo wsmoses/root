@@ -263,6 +263,7 @@ private:
    Hessian _hessian;
    bool _hasGradient = false;
    bool _hasHessian = false;
+   bool _useScalarHessian = false;
    mutable std::vector<double> _varBuffer;
    std::vector<double> _observables;
    std::unordered_map<RooFit::Detail::DataKey, std::size_t> _obsInfos;
@@ -376,6 +377,7 @@ RooFuncWrapper::RooFuncWrapper(RooAbsReal &obj, const RooAbsData *data, RooSimul
 
    _xlArr = ctx.xlArr();
    _collectedFunctions = ctx.collectedFunctions();
+   _useScalarHessian = (ctx.collectedCode().find("roo_outer_wrapper") != std::string::npos);
 }
 
 void RooFuncWrapper::loadData(RooAbsData const &data, RooSimultaneous const *simPdf, std::string const &rangeName,
@@ -411,7 +413,37 @@ void RooFuncWrapper::loadData(RooAbsData const &data, RooSimultaneous const *sim
 
 void RooFuncWrapper::createGradient()
 {
-#ifdef ROOFIT_CLAD
+#if defined(R__HAS_ENZYME) && !defined(R__HAS_CLAD)
+   std::string gradName = _funcName + "_grad_0";
+   gInterpreter->Declare("#include <Math/EnzymeDerivator.h>\n");
+
+   std::stringstream requestFuncStrm;
+   requestFuncStrm << "void " << gradName
+                   << "(double *params, double const *obs, double const *xlArr, double *_d_params) {\n"
+                      "  __enzyme_autodiff<void>((void *)"
+                   << _funcName
+                   << ", enzyme_dup, params, _d_params, enzyme_const, obs, enzyme_const, xlArr);\n"
+                      "}\n";
+   auto print = [](std::string const &msg) { oocoutI(nullptr, Fitting) << msg << std::endl; };
+
+   bool ok = false;
+   {
+      ROOT::Math::Util::TimingScope timingScope(print, "Gradient generation time:");
+      ok = gInterpreter->Declare(requestFuncStrm.str().c_str());
+   }
+   if (!ok) {
+      std::stringstream errorMsg;
+      errorMsg << "Function could not be differentiated. See above for details.";
+      oocoutE(nullptr, InputArguments) << errorMsg.str() << std::endl;
+      throw std::runtime_error(errorMsg.str().c_str());
+   }
+
+   std::stringstream ss;
+   ROOT::Math::Util::TimingScope timingScope(print, "Gradient IR to machine code time:");
+   ss << "static_cast<void (*)(double *, double const *, double const *, double *)>(" << gradName << ");";
+   _grad = reinterpret_cast<Grad>(gInterpreter->ProcessLine(ss.str().c_str()));
+   _hasGradient = true;
+#elif defined(ROOFIT_CLAD)
    std::string gradName = _funcName + "_grad_0";
    std::string requestName = _funcName + "_req";
 
@@ -451,7 +483,7 @@ void RooFuncWrapper::createGradient()
 #else
    _hasGradient = false;
    std::stringstream errorMsg;
-   errorMsg << "Function could not be differentiated since ROOT was built without Clad support.";
+   errorMsg << "Function could not be differentiated since ROOT was built without Clad or Enzyme support.";
    oocoutE(nullptr, InputArguments) << errorMsg.str() << std::endl;
    throw std::runtime_error(errorMsg.str().c_str());
 #endif
@@ -459,7 +491,87 @@ void RooFuncWrapper::createGradient()
 
 void RooFuncWrapper::createHessian()
 {
-#ifdef ROOFIT_CLAD
+#if defined(R__HAS_ENZYME) && !defined(R__HAS_CLAD)
+   std::string gradName = _funcName + "_grad_0";
+   std::string hessianName = _funcName + "_hessian_0";
+   const std::size_t nPar = _params.size();
+
+   gInterpreter->Declare("#include <Math/EnzymeDerivator.h>\n");
+
+   std::stringstream requestFuncStrm;
+   if (!gInterpreter->GetFunction(nullptr, gradName.c_str())) {
+      requestFuncStrm << "void " << gradName
+                      << "(double *params, double const *obs, double const *xlArr, double *_d_params) {\n"
+                         "  __enzyme_autodiff<void>((void *)"
+                      << _funcName
+                      << ", enzyme_dup, params, _d_params, enzyme_const, obs, enzyme_const, xlArr);\n"
+                         "}\n";
+   }
+
+   requestFuncStrm << "void " << hessianName
+                   << "(double *params, double const *obs, double const *xlArr, double *_hessian) {\n";
+   if (nPar > 0) {
+      requestFuncStrm << "  constexpr std::size_t N = " << nPar << ";\n"
+                      << "  double g_dummy[N]{};\n";
+      if (_useScalarHessian || nPar == 1) {
+         requestFuncStrm << "  double seed[N]{};\n"
+                         << "  for (std::size_t j = 0; j < N; ++j) {\n"
+                         << "    seed[j] = 1.0;\n"
+                         << "    __enzyme_fwddiff<void>((void *)" << gradName
+                         << ", enzyme_dup, params, seed, enzyme_const, obs, enzyme_const, xlArr, "
+                            "enzyme_dupnoneed, g_dummy, _hessian + j * N);\n"
+                         << "    seed[j] = 0.0;\n"
+                         << "  }\n";
+      } else if (nPar <= 32) {
+         requestFuncStrm << "  double seed[N * N]{};\n"
+                         << "  for (std::size_t j = 0; j < N; ++j) seed[j * N + j] = 1.0;\n"
+                         << "  constexpr std::size_t stride = N * sizeof(double);\n"
+                         << "  __enzyme_fwddiff<void>((void *)" << gradName
+                         << ", enzyme_width, N, enzyme_dupv, stride, params, seed, enzyme_const, obs, "
+                            "enzyme_const, xlArr, enzyme_dupnoneedv, stride, g_dummy, _hessian);\n";
+      } else {
+         requestFuncStrm << "  double seed[32 * N]{};\n"
+                         << "  constexpr std::size_t stride = N * sizeof(double);\n"
+                         << "  std::size_t base = 0;\n"
+                         << "  while (base + 32 <= N) {\n"
+                         << "    for (std::size_t v = 0; v < 32; ++v) seed[v * N + base + v] = 1.0;\n"
+                         << "    __enzyme_fwddiff<void>((void *)" << gradName
+                         << ", enzyme_width, 32, enzyme_dupv, stride, params, seed, enzyme_const, obs, "
+                            "enzyme_const, xlArr, enzyme_dupnoneedv, stride, g_dummy, _hessian + base * N);\n"
+                         << "    for (std::size_t v = 0; v < 32; ++v) seed[v * N + base + v] = 0.0;\n"
+                         << "    base += 32;\n"
+                         << "  }\n"
+                         << "  while (base < N) {\n"
+                         << "    seed[base] = 1.0;\n"
+                         << "    __enzyme_fwddiff<void>((void *)" << gradName
+                         << ", enzyme_dup, params, seed, enzyme_const, obs, enzyme_const, xlArr, "
+                            "enzyme_dupnoneed, g_dummy, _hessian + base * N);\n"
+                         << "    seed[base] = 0.0;\n"
+                         << "    ++base;\n"
+                         << "  }\n";
+      }
+   }
+   requestFuncStrm << "}\n";
+
+   auto print = [](std::string const &msg) { oocoutI(nullptr, Fitting) << msg << std::endl; };
+   bool ok = false;
+   {
+      ROOT::Math::Util::TimingScope timingScope(print, "Hessian generation time:");
+      ok = gInterpreter->Declare(requestFuncStrm.str().c_str());
+   }
+   if (!ok) {
+      std::stringstream errorMsg;
+      errorMsg << "Function could not be differentiated. See above for details.";
+      oocoutE(nullptr, InputArguments) << errorMsg.str() << std::endl;
+      throw std::runtime_error(errorMsg.str().c_str());
+   }
+
+   std::stringstream ss;
+   ROOT::Math::Util::TimingScope timingScope(print, "Hessian IR to machine code time:");
+   ss << "static_cast<void (*)(double *, double const *, double const *, double *)>(" << hessianName << ");";
+   _hessian = reinterpret_cast<Hessian>(gInterpreter->ProcessLine(ss.str().c_str()));
+   _hasHessian = true;
+#elif defined(ROOFIT_CLAD)
    std::string hessianName = _funcName + "_hessian_0";
    std::string requestName = _funcName + "_hessian_req";
 
@@ -501,7 +613,7 @@ void RooFuncWrapper::createHessian()
 #else
    _hasHessian = false;
    std::stringstream errorMsg;
-   errorMsg << "Function could not be differentiated since ROOT was built without Clad support.";
+   errorMsg << "Function could not be differentiated since ROOT was built without Clad or Enzyme support.";
    oocoutE(nullptr, InputArguments) << errorMsg.str() << std::endl;
    throw std::runtime_error(errorMsg.str().c_str());
 #endif
@@ -540,6 +652,35 @@ void RooFuncWrapper::writeDebugMacro(std::string const &filename) const
    std::string paramsStr =
       _params.size() == 1 ? "\"params[0]\"" : ("\"params[0:" + std::to_string(_params.size() - 1) + "]\"");
    outFile.open(filename + ".C");
+#if defined(R__HAS_ENZYME) && !defined(R__HAS_CLAD)
+   outFile << R"(//auto-generated test macro
+#include <RooFit/Detail/MathFuncs.h>
+#include <Math/EnzymeDerivator.h>
+
+//#define DO_HESSIAN
+
+)" << allCode.str()
+           << "\nvoid " << _funcName
+           << "_grad_0(double *params, double const *obs, double const *xlArr, double *_d_params) {\n"
+           << "   __enzyme_autodiff<void>((void *)" << _funcName
+           << ", enzyme_dup, params, _d_params, enzyme_const, obs, enzyme_const, xlArr);\n"
+           << "}\n"
+           << "#ifdef DO_HESSIAN\n"
+           << "void " << _funcName
+           << "_hessian_0(double *params, double const *obs, double const *xlArr, double *_hessian) {\n"
+           << "   constexpr std::size_t N = " << _params.size() << ";\n"
+           << "   double g_dummy[N]{};\n"
+           << "   double seed[N]{};\n"
+           << "   for (std::size_t j = 0; j < N; ++j) {\n"
+           << "      seed[j] = 1.0;\n"
+           << "      __enzyme_fwddiff<void>((void *)" << _funcName
+           << "_grad_0, enzyme_dup, params, seed, enzyme_const, obs, enzyme_const, xlArr, "
+              "enzyme_dupnoneed, g_dummy, _hessian + j * N);\n"
+           << "      seed[j] = 0.0;\n"
+           << "   }\n"
+           << "}\n"
+           << "#endif\n";
+#else
    outFile << R"(//auto-generated test macro
 #include <RooFit/Detail/MathFuncs.h>
 #include <Math/CladDerivator.h>
@@ -559,6 +700,7 @@ void gradient_request() {
 }
 #pragma clad OFF
 )";
+#endif
 
    updateGradientVarBuffer();
 

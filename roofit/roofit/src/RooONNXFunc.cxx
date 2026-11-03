@@ -359,6 +359,129 @@ std::string _RooONNXFunc_onnxToCppWithSofie(std::uint8_t const *onnxBytes, std::
    _runtime->_d_session.emplace(sessionName);
    auto ptrDSession = toPtrString(_runtime->_d_session.ptr, sessionName);
 
+#if defined(R__HAS_ENZYME) && !defined(R__HAS_CLAD)
+   gInterpreter->Declare("#include <Math/EnzymeDerivator.h>");
+   gInterpreter->ProcessLine((ptrDSession + "->SetWeightsToZero();").c_str());
+
+   // Emit roo_outer_wrapper along with Enzyme forward and reverse custom derivative
+   // registrations bridging the double-precision RooFit codegen arrays to the
+   // single-precision SOFIE model inference kernel.
+   {
+      std::ostringstream ss;
+      ss << "namespace " << namespaceName << " {\n\n"
+         << "inline float roo_inner_ptr(Session const *session, " << innerParams << ") {\n"
+         << "   return roo_inner_wrapper(*session, " << innerArgs << ");\n"
+         << "}\n\n"
+         << "double roo_outer_wrapper(" << outerDoubleParams << ") {\n"
+         << "   auto &session = *" << ptrSession << ";\n";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         ss << "   float inputFlt" << i << "[inputTensorDims[" << i << "].total_size()];\n"
+            << "   for (std::size_t k = 0; k < std::size(inputFlt" << i << "); ++k) {\n"
+            << "      inputFlt" << i << "[k] = static_cast<float>(input" << i << "[k]);\n"
+            << "   }\n";
+      }
+      ss << "   return roo_inner_wrapper(session";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         ss << ", inputFlt" << i;
+      }
+      ss << ");\n"
+         << "}\n\n"
+         << "struct roo_outer_aug_ret { float *tape; double val; };\n"
+         << "inline roo_outer_aug_ret roo_outer_wrapper_augfwd(";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         if (i > 0)
+            ss << ", ";
+         ss << "double const *input" << i << ", double * /*d_input" << i << "*/";
+      }
+      ss << ") {\n"
+         << "   constexpr ::std::size_t kTotalSize = 0";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         ss << " + inputTensorDims[" << i << "].total_size()";
+      }
+      ss << ";\n"
+         << "   float *tape = new float[kTotalSize];\n"
+         << "   ::std::size_t offset = 0;\n";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         ss << "   float *inputFlt" << i << " = tape + offset;\n"
+            << "   for (::std::size_t k = 0; k < inputTensorDims[" << i << "].total_size(); ++k) {\n"
+            << "      inputFlt" << i << "[k] = static_cast<float>(input" << i << "[k]);\n"
+            << "   }\n"
+            << "   offset += inputTensorDims[" << i << "].total_size();\n";
+      }
+      ss << "   auto &session = *" << ptrSession << ";\n"
+         << "   double val = static_cast<double>(roo_inner_wrapper(session";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         ss << ", inputFlt" << i;
+      }
+      ss << "));\n"
+         << "   return {tape, val};\n"
+         << "}\n\n"
+         << "inline void roo_outer_wrapper_rev(";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         ss << "double const *input" << i << ", double *d_input" << i << ", ";
+      }
+      ss << "double d_y, float *tape) {\n"
+         << "   ::std::size_t offset = 0;\n";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         ss << "   float *inputFlt" << i << " = tape + offset;\n"
+            << "   offset += inputTensorDims[" << i << "].total_size();\n"
+            << "   float d_inputFlt" << i << "[inputTensorDims[" << i << "].total_size()]{};\n";
+      }
+      ss << "   auto const *session = " << ptrSession << ";\n"
+         << "   auto *d_session = " << ptrDSession << ";\n"
+         << "   __enzyme_autodiff<void>((void *)&roo_inner_ptr, enzyme_dup, session, d_session";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         ss << ", enzyme_dup, inputFlt" << i << ", d_inputFlt" << i;
+      }
+      ss << ");\n";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         ss << "   if (d_input" << i << " && d_input" << i << " != input" << i << ") {\n"
+            << "      for (::std::size_t k = 0; k < inputTensorDims[" << i << "].total_size(); ++k) {\n"
+            << "         d_input" << i << "[k] += static_cast<double>(d_inputFlt" << i << "[k]) * d_y;\n"
+            << "      }\n"
+            << "   }\n";
+      }
+      ss << "   delete[] tape;\n"
+         << "}\n\n"
+         << "struct roo_outer_fwd_ret { double val; double dval; };\n"
+         << "inline roo_outer_fwd_ret roo_outer_wrapper_fwddiff(";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         if (i > 0)
+            ss << ", ";
+         ss << "double const *input" << i << ", double const *d_input" << i;
+      }
+      ss << ") {\n";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         ss << "   float inputFlt" << i << "[inputTensorDims[" << i << "].total_size()];\n"
+            << "   float d_inputFlt" << i << "[::std::size(inputFlt" << i << ")];\n"
+            << "   for (::std::size_t k = 0; k < ::std::size(inputFlt" << i << "); ++k) {\n"
+            << "      inputFlt" << i << "[k] = static_cast<float>(input" << i << "[k]);\n"
+            << "      d_inputFlt" << i << "[k] = (d_input" << i << " && d_input" << i << " != input" << i
+            << ") ? static_cast<float>(d_input" << i << "[k]) : 0.0f;\n"
+            << "   }\n";
+      }
+      ss << "   auto const *session = " << ptrSession << ";\n"
+         << "   auto zero_s = session->CreateZeroShadow();\n"
+         << "   double val = static_cast<double>(roo_inner_ptr(session";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         ss << ", inputFlt" << i;
+      }
+      ss << "));\n"
+         << "   float dval = __enzyme_fwddiff<float>((void *)&roo_inner_ptr, enzyme_dup, session, &zero_s";
+      for (std::size_t i = 0; i < nInputTensors; ++i) {
+         ss << ", enzyme_dup, inputFlt" << i << ", d_inputFlt" << i;
+      }
+      ss << ");\n"
+         << "   return {val, static_cast<double>(dval)};\n"
+         << "}\n\n"
+         << "__attribute__((used)) inline void *__enzyme_register_gradient_roo_outer[3] = {\n"
+         << "   (void *)&roo_outer_wrapper, (void *)&roo_outer_wrapper_augfwd, (void *)&roo_outer_wrapper_rev};\n"
+         << "__attribute__((used)) inline void *__enzyme_register_derivative_roo_outer[2] = {\n"
+         << "   (void *)&roo_outer_wrapper, (void *)&roo_outer_wrapper_fwddiff};\n"
+         << "} // namespace " << namespaceName << "\n";
+      gInterpreter->Declare(ss.str().c_str());
+   }
+#else
    gInterpreter->Declare("#include <Math/CladDerivator.h>");
 
    gInterpreter->ProcessLine(("clad::gradient(" + namespaceName + "::roo_wrapper, \"" + cladInputs + "\");").c_str());
@@ -421,6 +544,7 @@ std::string _RooONNXFunc_onnxToCppWithSofie(std::uint8_t const *onnxBytes, std::
          << "} // namespace clad::custom_derivatives\n";
       gInterpreter->Declare(ss.str().c_str());
    }
+#endif
 }
 
 double RooONNXFunc::evaluate() const

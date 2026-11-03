@@ -16,9 +16,9 @@ ROOT_ADD_GTEST(testHistFactory testHistFactory.cxx
   LIBRARIES RooFitCore RooFit RooStats HistFactory RooFitHS3
   COPY_TO_BUILDDIR ${CMAKE_CURRENT_SOURCE_DIR}/ref_6.16_example_UsingC_channel1_meas_model.root ${CMAKE_CURRENT_SOURCE_DIR}/ref_6.16_example_UsingC_combined_meas_model.root)
 
-if(clad)
+if(clad OR enzyme)
   target_compile_definitions(testHistFactory PUBLIC TEST_CODEGEN_AD)
-endif(clad)
+endif()
 
 ROOT_ADD_GTEST(testParamHistFunc testParamHistFunc.cxx LIBRARIES RooFitCore HistFactory)
 ROOT_ADD_GTEST(testPiecewiseInterpolation testPiecewiseInterpolation.cxx LIBRARIES RooFitCore HistFactory)

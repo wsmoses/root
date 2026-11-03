@@ -40,8 +40,11 @@ namespace cling {
     llvm::TargetMachine& m_TM;
     IncrementalJIT &m_JIT;
     const clang::CodeGenOptions &m_CGOpts;
+    std::unique_ptr<llvm::Module> m_EnzymeIRArchive;
 
-    void CreatePasses(int OptLevel, llvm::ModulePassManager& MPM,
+    void CreatePasses(int OptLevel, int OrigOptLevel,
+                      bool NeedsEnzymePipeline, bool HasEnzymeCalls,
+                      llvm::ModulePassManager& MPM,
                       llvm::LoopAnalysisManager& LAM,
                       llvm::FunctionAnalysisManager& FAM,
                       llvm::CGSCCAnalysisManager& CGAM,

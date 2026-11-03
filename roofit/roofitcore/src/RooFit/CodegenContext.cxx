@@ -210,7 +210,9 @@ std::unique_ptr<CodegenContext::LoopScope> CodegenContext::beginLoop(RooAbsArg c
    }
 
    // Make sure that the name of this variable doesn't clash with other stuff
+#ifdef R__HAS_CLAD
    addToCodeBody(in, "#pragma clad checkpoint loop\n");
+#endif
    addToCodeBody(in, "for(int " + idx + " = 0; " + idx + " < obs[" + std::to_string(2 * firstObsIdx + 1) + "]; " + idx +
                         "++) {\n");
 

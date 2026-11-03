@@ -72,6 +72,13 @@ float Linear_16_wrapper_num_diff(TMVA_SOFIE_Linear_16::Session const &session, f
 
    auto inputInterp = toInterpreter(input, "std::vector<float>", true);
 
+#if defined(R__HAS_ENZYME) && !defined(R__HAS_CLAD)
+   gInterpreter->ProcessLine("TMVA_SOFIE_Linear_16::Session session_linear_16{\"Linear_16_FromONNX.dat\"};");
+   gInterpreter->ProcessLine("float grad_output[1600]{};");
+   gInterpreter->ProcessLine(
+      ("clad::gradient(Linear_16_wrapper, \"input\").execute(session_linear_16, " + inputInterp + ", grad_output);")
+         .c_str());
+#else
    // Why do we have two wrappers, the <>_wrapper and the <>_outer_wrapper?
    // This is because we are not interested in the created gradient function.
    // We are interested in the more low-level *pullback* function, which takes
@@ -90,6 +97,7 @@ float Linear_16_wrapper_num_diff(TMVA_SOFIE_Linear_16::Session const &session, f
    gInterpreter->ProcessLine(
       ("Linear_16_wrapper_pullback(session_linear_16, " + inputInterp + ", 1, &_d_session_linear_16, grad_output)")
          .c_str());
+#endif
 
    // If you want to see the gradient code:
    // clang-format off
@@ -164,6 +172,67 @@ float sig_outer(TMVA_SOFIE_LinearWithSigmoid::Session const &session, float cons
 }
    )");
 
+#if defined(R__HAS_ENZYME) && !defined(R__HAS_CLAD)
+   auto inputInterp = toInterpreter(input, "std::vector<float>", true);
+
+   gInterpreter->Declare(R"(
+TMVA_SOFIE_LinearWithSigmoid::Session sig_session{"LinearWithSigmoid_FromONNX_unoptimized.dat"};
+std::vector<float> sig_grad(48, 0.0f);
+std::vector<float> sig_fwd(48, 0.0f);
+std::vector<float> sig_hess(48 * 48, 0.0f);
+std::vector<float> sig_hess_fd(48 * 48, 0.0f);
+   )");
+
+   // Reverse-mode gradient via drop-in clad::gradient API.
+   gInterpreter->ProcessLine(
+      ("clad::gradient(sig_w, \"input\").execute(sig_session, " + inputInterp + ", sig_grad.data());").c_str());
+
+   // Forward-mode directional derivatives along all 48 unit directions.
+   gInterpreter->ProcessLine((R"(
+   for (int j = 0; j < 48; ++j) {
+      std::string spec = "input[" + std::to_string(j) + "]";
+      sig_fwd[j] = clad::differentiate(sig_w, spec.c_str()).execute(sig_session, )" +
+                              inputInterp + R"();
+   }
+   )")
+                                .c_str());
+
+   auto *gradArr = reinterpret_cast<float *>(gInterpreter->ProcessLine("sig_grad.data();"));
+   auto *fwdArr = reinterpret_cast<float *>(gInterpreter->ProcessLine("sig_fwd.data();"));
+   for (int i = 0; i < nInputs; ++i) {
+      EXPECT_NEAR(fwdArr[i], gradArr[i], 1e-5) << "forward vs reverse derivative at input index " << i;
+   }
+
+   // Full 48x48 Hessian in a single batched call (no manual adjoint sessions or file reloads).
+   gInterpreter->ProcessLine(("clad::hessian(sig_w, \"input[0:47]\").execute(sig_session, " + inputInterp +
+                              ", clad::array_ref<float>(sig_hess.data(), 48 * 48));")
+                                .c_str());
+
+   // Reference Hessian: central finite differences of the exact reverse-mode gradient.
+   gInterpreter->Declare(R"(
+void sig_fd_hessian(float *input)
+{
+   const float eps = 1e-2f;
+   auto gradFn = clad::gradient(sig_w, "input");
+   std::vector<float> gp(48);
+   std::vector<float> gm(48);
+   for (int j = 0; j < 48; ++j) {
+      const float orig = input[j];
+      std::fill(gp.begin(), gp.end(), 0.0f);
+      std::fill(gm.begin(), gm.end(), 0.0f);
+      input[j] = orig + eps;
+      gradFn.execute(sig_session, input, gp.data());
+      input[j] = orig - eps;
+      gradFn.execute(sig_session, input, gm.data());
+      input[j] = orig;
+      for (int i = 0; i < 48; ++i) {
+         sig_hess_fd[i * 48 + j] = (gp[i] - gm[i]) / (2 * eps);
+      }
+   }
+}
+   )");
+   gInterpreter->ProcessLine(("sig_fd_hessian(" + inputInterp + ");").c_str());
+#else
    // Generate sig_w_pullback (reverse mode) and sig_w_pushforward (forward mode).
    gInterpreter->ProcessLine("clad::gradient(sig_outer, \"input\");");
    gInterpreter->ProcessLine("clad::differentiate(sig_outer, \"input[0]\");");
@@ -299,6 +368,7 @@ void sig_fd_hessian(float *input)
 }
    )");
    gInterpreter->ProcessLine(("sig_fd_hessian(" + inputInterp + ");").c_str());
+#endif
 
    auto *hessArr = reinterpret_cast<float *>(gInterpreter->ProcessLine("sig_hess.data();"));
    auto *hessFdArr = reinterpret_cast<float *>(gInterpreter->ProcessLine("sig_hess_fd.data();"));

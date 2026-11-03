@@ -78,7 +78,7 @@ ROOT_ADD_GTEST(testRooRealVar testRooRealVar.cxx LIBRARIES RooFitCore
   ROOT_ADD_GTEST(testRooAbsReal testRooAbsReal.cxx
     LIBRARIES RooFit RooFitCore
     COPY_TO_BUILDDIR ${CMAKE_CURRENT_SOURCE_DIR}/testRooAbsReal_1.root ${CMAKE_CURRENT_SOURCE_DIR}/testRooAbsReal_2.root)
-if(clad)
+if(clad OR enzyme)
   ROOT_ADD_GTEST(testRooFuncWrapper testRooFuncWrapper.cxx LIBRARIES RooFitCore RooFit HistFactory)
 endif()
 ROOT_ADD_GTEST(testNaNPacker testNaNPacker.cxx LIBRARIES RooFitCore)
@@ -119,7 +119,7 @@ if(roofit_legacy_eval_backend)
 endif()
 ROOT_ADD_TEST(test-stressroofit-cpu COMMAND stressRooFit -b cpu FAILREGEX "FAILED|Error in")
 ROOT_ADD_TEST(test-stressroofit-codegen_no_grad COMMAND stressRooFit -b codegen_no_grad FAILREGEX "FAILED|Error in")
-if(clad)
+if(clad OR enzyme)
   ROOT_ADD_TEST(test-stressroofit-codegen COMMAND stressRooFit -b codegen FAILREGEX "FAILED|Error in")
 endif()
 if(cuda)

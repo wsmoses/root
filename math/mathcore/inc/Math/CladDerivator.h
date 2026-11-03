@@ -22,6 +22,12 @@
 #error "This file must not be included by compiled programs."
 #endif //__CLING__
 
+#include <RConfigure.h>
+
+#if defined(R__HAS_ENZYME) && !defined(R__HAS_CLAD)
+#include "Math/EnzymeDerivator.h"
+#else
+
 #include <plugins/include/clad/Differentiator/Differentiator.h>
 #include "TMath.h"
 #include "Math/PdfFuncMathCore.h"
@@ -975,5 +981,7 @@ landau_cdf_pushforward(double x, double xi, double x0, double d_x, double d_xi, 
 
 } // namespace custom_derivatives
 } // namespace clad
+
+#endif // defined(R__HAS_ENZYME) && !defined(R__HAS_CLAD)
 
 #endif // CLAD_DERIVATOR
